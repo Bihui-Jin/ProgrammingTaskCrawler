@@ -10,7 +10,7 @@ namespace ProgrammingTaskCrawler
     {
         public void ExportCSV(List<CrawlerData> list)
         {
-
+            list.RemoveAt(0);
             try
             {
                 if (list == null)
@@ -20,19 +20,14 @@ namespace ProgrammingTaskCrawler
 
                 StringBuilder csvText = new StringBuilder();
                 StringBuilder csvrowText = new StringBuilder();
-                foreach (var i in list)
-                {
-                    csvrowText.Append(",");
-                    csvrowText.Append(i.Name);
-                }
-                csvText.AppendLine(csvrowText.ToString().Substring(1)); //headers
-                csvrowText = new StringBuilder();
+                
+                csvText.AppendLine("Version,Assignee,Created,Created Epoch,Description,Comments"); //headers
+                
                 foreach (var d in list)
                 {
-                    csvrowText.Append(",");
-                    csvrowText.Append($"{d.Content}");
+                    csvrowText.Append($"{d.Version},{d.Assignee},{d.Created},{d.CreatedEpoch},{d.Description},{d.Comments}\n");
                 }
-                csvText.AppendLine(csvrowText.ToString().Substring(1)); //body
+                csvText.AppendLine(csvrowText.ToString()); //body
 
                 File.WriteAllText("ApacheCrawler.csv", csvText.ToString(), Encoding.UTF8);//Export the file
             }
@@ -41,5 +36,5 @@ namespace ProgrammingTaskCrawler
                 Console.WriteLine("Export .csv file fail!" + ex.Message);
             }
         }
-	}
+    }
 }

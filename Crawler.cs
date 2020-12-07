@@ -8,134 +8,92 @@ using System.Collections.Generic;
 using AngleSharp.Html.Parser;
 using HtmlAgilityPack;
 using OpenQA.Selenium;
+using System.Linq;
+using System.Threading;
 using System.Text.RegularExpressions;
+using OpenQA.Selenium.Support.UI;
+using AngleSharp;
 
 namespace ProgrammingTaskCrawler
 {
     public class Crawler
     {
-        public static List<CrawlerData> GetText(string html, string url)
+        public async static Task<CrawlerData> GetText(string html)
         {
-            List<CrawlerData> list = new List<CrawlerData>();
-            var parser = new HtmlParser();
-            var text = parser.ParseDocument(html);
-            var doc = new HtmlDocument();
-            doc.LoadHtml(html);
+            var items = new CrawlerData();
 
-            foreach (var item in text.QuerySelectorAll("div.wrap")) //Find the Type
+            try
             {
-                if (item.TextContent.Contains("Type:")) {
-                    list.Add( new CrawlerData { Name="Type", Content=Regex.Replace(item.TextContent.Replace("\n", string.Empty), @"\s+", " ").Split(":")[1].Trim() }); 
-                }
+                var context = BrowsingContext.New(Configuration.Default);
+                var document = await context.OpenAsync(req => req.Content(html));       //parse the stringified html
+                Console.WriteLine("Version: {0}", document.All.Where(m => m.LocalName == "a" && m.ClassList.Contains("issue-link")).FirstOrDefault().TextContent.Split(" ")[0].Trim());
+                //get the issue report version
+                items.Version = document.All.Where(m => m.LocalName == "a" && m.ClassList.Contains("issue-link")).FirstOrDefault().TextContent.Split(" ")[0].Trim();
 
-            }
-
-            foreach (var item in text.QuerySelectorAll("dl"))//Find the Assignee
-            {
-                if (item.TextContent.Contains("Assignee:")) { 
-                    list.Add(new CrawlerData { Name = "Assignee", Content = item.TextContent.Replace("\n", string.Empty).Split(":")[1].Trim() }); 
-                }
-
-            }
-            IWebDriver driver = new OpenQA.Selenium.Chrome.ChromeDriver();
-            driver.Navigate().GoToUrl(url);
-
-            //Find the created time
-            var time = driver.FindElement(By.Id("created-val")).FindElement(By.TagName("time")).GetAttribute("datetime");
-            TimeSpan t = DateTime.Parse(time) - new DateTime(1970, 1, 1, 0, 0, 0, 0);
-            list.Add (new CrawlerData { Name = "Created", Content = time + "，" + t.TotalSeconds + $"， where {t.TotalSeconds} is the epoch" });
-
-            foreach (var item in text.QuerySelectorAll("div.user-content-block")) //Find the Description
-            {
-                list.Add(new CrawlerData { Name = "Description", Content = Regex.Replace(item.TextContent.Replace("\n", string.Empty).Replace(",", "，"), @"\s+", " ").Trim() });
-
-            }
-
-            //Get Comments on the dynamic web page
-            list.Add(new CrawlerData { Name = "Comments", Content = Regex.Replace(driver.FindElement(By.Id("issue_actions_container")).Text.Replace(",","，"), @"\s+", " ").Trim() });
-            return list;
-
-
-        }
-        public CookieContainer CookiesContainer { get; set; }//Define cookie container
-        public async Task<string> StartUp(String url, string proxy = null)
-        {
-            return await Task.Run(() =>
-            {
-                var pageSource = String.Empty;
-                try
+                //find the Type and Assignee
+                foreach (var item in document.QuerySelectorAll("span")) 
                 {
+                    if (item.Id == "type-val")
+                    {
+                        //Console.WriteLine("Type: {0}", item.TextContent.Trim());
+                        items.Type = item.TextContent.Trim();
 
-                    var request = (HttpWebRequest)WebRequest.Create(url);
-                    request.Accept = "*/*";
-                    request.ServicePoint.Expect100Continue = false;//Speed up loading
-                    request.ServicePoint.UseNagleAlgorithm = false;//Disable Nagle algorithm to speed up loading
-                    request.AllowWriteStreamBuffering = false;//Disable buffering to speed up loading
-                    request.Headers.Add(HttpRequestHeader.AcceptEncoding, "gzip,deflate");//Define gzip compression page support
-                    request.ContentType = "application/x-www-form-uriencoded";//Define document and encoding type
-                    request.AllowAutoRedirect = false;//Prohibit auto redirection
-                    //Set up User-Agent, pretending to be Google Chrome browser
-                    request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36";
-                    request.Timeout = 5000;//Define the request timeout time as 5 seconds
-                    request.KeepAlive = true;//Enable keep-alive
-                    request.Method = "GET";//Request Type: GET        
-                    if (proxy != null) request.Proxy = new WebProxy(proxy);//Set the proxy server IP, disguise the request address
-                    request.CookieContainer = this.CookiesContainer;//Add cookie container
-                    request.ServicePoint.ConnectionLimit = int.MaxValue;//Define max connections
-                    using (var response = (HttpWebResponse)request.GetResponse())
-                    {//Get request response
-
-                        foreach (System.Net.Cookie cookie in response.Cookies) this.CookiesContainer.Add(cookie);//keep login
-
-                        if (response.ContentEncoding.ToLower().Contains("gzip"))//Unzip
-                        {
-                            using (GZipStream stream = new GZipStream(response.GetResponseStream(), CompressionMode.Decompress))
-                            {
-                                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                                {
-                                    pageSource = reader.ReadToEnd();
-                                }
-                            }
-                        }
-                        else if (response.ContentEncoding.ToLower().Contains("deflate"))//Unzip
-                        {
-                            using (DeflateStream stream = new DeflateStream(response.GetResponseStream(), CompressionMode.Decompress))
-                            {
-                                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                                {
-                                    pageSource = reader.ReadToEnd();
-                                }
-
-                            }
-                        }
-                        else
-                        {
-                            using (Stream stream = response.GetResponseStream())//Origin
-                            {
-                                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                                {
-
-                                    pageSource = reader.ReadToEnd();
-                                }
-                            }
-                        }
                     }
-                    request.Abort();
+                    else if (item.Id == "assignee-val")
+                    {
+                        //Console.WriteLine("Assignee: {0}", item.TextContent.Trim());
+                        items.Assignee = item.TextContent.Trim();
+                    }
 
                 }
-                catch (Exception e)
+                //Console.WriteLine("Type: {0}", document.All.Where(m => m.LocalName == "span" && m.Id=="type-val").FirstOrDefault().TextContent.Trim());
+                //Console.WriteLine("Assignee: {0}", document.All.Where(m => m.LocalName == "span" && m.Id== "assignee-val").FirstOrDefault().TextContent.Trim());
+
+                //Console.WriteLine("Created: {0}", document.All.Where(m => m.LocalName == "time" && m.ClassName== "livestamp").FirstOrDefault().GetAttribute("datetime").Trim());
+                //find out the created time
+                items.Created = document.All.Where(m => m.LocalName == "time" && m.ClassName == "livestamp").FirstOrDefault().GetAttribute("datetime").Trim();
+                
+                //Console.WriteLine("Created_Epoch: {0}， where {0} is the epoch", (DateTime.Parse(document.All.Where(m => m.LocalName == "time" && m.ClassName == "livestamp").FirstOrDefault().GetAttribute("datetime").Trim()) - new DateTime(1970, 1, 1, 0, 0, 0, 0)).TotalSeconds);
+                //find out the created time epoch
+                items.CreatedEpoch = $"{(DateTime.Parse(items.Created) - new DateTime(1970, 1, 1, 0, 0, 0, 0)).TotalSeconds}， where {(DateTime.Parse(items.Created) - new DateTime(1970, 1, 1, 0, 0, 0, 0)).TotalSeconds} is the epoch";
+
+                //obtain the description if empty in web => " "
+                if (document.All.Where(m => m.LocalName == "div" && m.ClassName == "user-content-block").Count() > 0)
                 {
-                    Console.WriteLine(e.ToString());
-                    return "Error";
+                    //Console.WriteLine("Description: {0}", Regex.Replace(document.All.Where(m => m.LocalName == "div" && m.ClassName == "user-content-block").FirstOrDefault().TextContent.Replace("\n", string.Empty).Replace(",", "，"), @"\s+", " ").Trim());
+                    items.Description = Regex.Replace(document.All.Where(m => m.LocalName == "div" && m.ClassName == "user-content-block").FirstOrDefault().TextContent.Replace("\n", string.Empty).Replace(",", "，"), @"\s+", " ").Trim();
                 }
-                return pageSource;
-            });
+                else
+                {
+                    //Console.WriteLine("Description: '' ");
+                    items.Description = "";
+                }
+
+
+                //Console.WriteLine("Comments: {0}", Regex.Replace(document.All.Where(m => m.LocalName == "div" && m.ClassName == "issuePanelContainer").FirstOrDefault().TextContent.Replace(",", "，"), @"\s+", " ").Trim());
+                //get the comment
+                items.Comments = Regex.Replace(document.All.Where(m => m.LocalName == "div" && m.ClassName == "issuePanelContainer").FirstOrDefault().TextContent.Replace(",", "，"), @"\s+", " ").Trim();
+
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message.Trim());
+            }
+
+            return items;
+
+
         }
 
         public class CrawlerData
         {
-            public string Name { get; set; }
-            public string Content { get; set; }
+            public string Version { get; set; }
+            public string Type { get; set; }
+            public string Assignee { get; set; }
+            public string Created { get; set; }
+            public string CreatedEpoch { get; set; }
+            public string Description { get; set; }
+            public string Comments { get; set; }
         }
     }
 }
